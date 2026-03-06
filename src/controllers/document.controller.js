@@ -1,5 +1,6 @@
 const { askAI } = require("../services/ai.service");
 const fs = require("fs");
+// pdf-parse@1.x exposes a simple function API
 const pdfParse = require("pdf-parse");
 
 const Document = require("../models/document.model");
@@ -42,8 +43,7 @@ exports.uploadDocument = async (req, res) => {
     const fileBuffer = fs.readFileSync(file.path);
 
     const pdfData = await pdfParse(fileBuffer);
-
-    const extractedText = pdfData.text;
+    const extractedText = pdfData?.text || "";
 
     const chunks = chunkText(extractedText, 500).filter((c) => c && c.trim().length > 0);
 
@@ -74,14 +74,16 @@ exports.uploadDocument = async (req, res) => {
       await Document.updateOne({ _id: document._id }, { $set: { embeddings: docEmbedding } });
     }
 
-    res.json({
+    return res.json({
       message: "Document uploaded and chunked successfully",
       documentId: document._id,
       chunksCreated: chunks.length
     });
 
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Error in uploadDocument:", error);
+    console.error(error?.stack);
+    return res.status(500).json({ error: error.message });
   }
 };
 
@@ -129,7 +131,10 @@ exports.askQuestion = async (req, res) => {
       .map((doc) => doc.extractedText)
       .join("\n\n");
 
-    const answer = await askAI(context, question);
+    const MAX_CONTEXT_CHARS = 4000;
+    const trimmedContext = context.slice(0, MAX_CONTEXT_CHARS);
+
+    const answer = await askAI(trimmedContext, question);
 
     res.json({
       question,

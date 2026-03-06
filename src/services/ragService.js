@@ -11,8 +11,10 @@ const askQuestion = async (question) => {
     .map(chunk => chunk.text)
     .join("\n\n");
 
-  // 3 send to LLM
-  const answer = await askAI(context, question);
+    const MAX_CONTEXT_CHARS = 4000;
+    const trimmedContext = context.slice(0, MAX_CONTEXT_CHARS);
+    // 3 send to LLM
+    const answer = await askAI(trimmedContext, question);
 
   return {
     answer,
