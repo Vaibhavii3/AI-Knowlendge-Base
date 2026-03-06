@@ -92,6 +92,42 @@
       "name": "Documents",
       "item": [
         {
+          "name": "GET /api/documents/demo-pdf (download demo PDF)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/documents/demo-pdf",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "documents", "demo-pdf" ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/documents/demo-ingest (create demo chunks)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+            "url": {
+              "raw": "{{baseUrl}}/api/documents/demo-ingest",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "documents", "demo-ingest" ]
+            }
+          }
+        },
+        {
+          "name": "GET /api/documents/chunks?limit=10 (debug)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+            "url": {
+              "raw": "{{baseUrl}}/api/documents/chunks?limit=10",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "documents", "chunks" ],
+              "query": [ { "key": "limit", "value": "10" } ]
+            }
+          }
+        },
+        {
           "name": "POST /api/documents/upload (multipart: file)",
           "request": {
             "method": "POST",

@@ -14,6 +14,23 @@ router.post(
 );
 
 router.get(
+  "/demo-pdf",
+  documentController.downloadDemoPdf
+);
+
+router.post(
+  "/demo-ingest",
+  authMiddleware,
+  documentController.ingestDemoPdf
+);
+
+router.get(
+  "/chunks",
+  authMiddleware,
+  documentController.listChunks
+);
+
+router.get(
   "/search",
   authMiddleware,
   documentController.searchDocuments

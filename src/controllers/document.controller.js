@@ -1,7 +1,9 @@
 const { askAI } = require("../services/ai.service");
 const fs = require("fs");
+const path = require("path");
 // pdf-parse@1.x exposes a simple function API
 const pdfParse = require("pdf-parse");
+const PDFDocument = require("pdfkit");
 
 const Document = require("../models/document.model");
 const Chunk = require("../models/chunk.model");
@@ -30,6 +32,88 @@ const meanEmbedding = (vectors) => {
   return sum;
 };
 
+const ensureUploadsDir = async () => {
+  const uploadsDir = path.join(process.cwd(), "uploads");
+  await fs.promises.mkdir(uploadsDir, { recursive: true });
+  return uploadsDir;
+};
+
+const createDemoPdfBuffer = async () => {
+  const doc = new PDFDocument({ size: "A4", margin: 50 });
+  const chunks = [];
+
+  return await new Promise((resolve, reject) => {
+    doc.on("data", (d) => chunks.push(d));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    doc.fontSize(20).text("Backend API Phases (Demo Document)", { underline: true });
+    doc.moveDown();
+    doc.fontSize(12).text(
+      [
+        "This is a demo PDF used for testing the AI Knowledge Base API.",
+        "",
+        "Phase 1: Requirements & Planning",
+        "- Define endpoints and user stories",
+        "- Choose authentication (JWT) and data model",
+        "",
+        "Phase 2: API Design",
+        "- REST routes, request/response schemas",
+        "- Error handling, validation, pagination",
+        "",
+        "Phase 3: Implementation",
+        "- Controllers, services, database models",
+        "- Middleware (auth, upload)",
+        "",
+        "Phase 4: Testing",
+        "- Unit/integration testing with Postman",
+        "- Edge cases: invalid token, missing fields",
+        "",
+        "Phase 5: Deployment & Monitoring",
+        "- Environment variables, logs, metrics",
+        "- Rate limiting, security hardening"
+      ].join("\n")
+    );
+
+    doc.end();
+  });
+};
+
+const ingestPdfBuffer = async ({ fileBuffer, title, fileUrl, fileType, uploadedBy }) => {
+  const pdfData = await pdfParse(fileBuffer);
+  const extractedText = pdfData?.text || "";
+
+  const chunks = chunkText(extractedText, 500).filter((c) => c && c.trim().length > 0);
+
+  const document = await Document.create({
+    title,
+    fileUrl,
+    fileType,
+    uploadedBy,
+    extractedText
+  });
+
+  const chunkEmbeddings = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const embedding = to1dEmbedding(await generateEmbedding(chunks[i]));
+    chunkEmbeddings.push(embedding);
+
+    await Chunk.create({
+      documentId: document._id,
+      text: chunks[i],
+      embedding,
+      chunkIndex: i
+    });
+  }
+
+  const docEmbedding = meanEmbedding(chunkEmbeddings);
+  if (docEmbedding.length > 0) {
+    await Document.updateOne({ _id: document._id }, { $set: { embeddings: docEmbedding } });
+  }
+
+  return { document, chunksCreated: chunks.length };
+};
+
 
 exports.uploadDocument = async (req, res) => {
   try {
@@ -41,48 +125,78 @@ exports.uploadDocument = async (req, res) => {
     }
 
     const fileBuffer = fs.readFileSync(file.path);
-
-    const pdfData = await pdfParse(fileBuffer);
-    const extractedText = pdfData?.text || "";
-
-    const chunks = chunkText(extractedText, 500).filter((c) => c && c.trim().length > 0);
-
-    const document = await Document.create({
+    const { document, chunksCreated } = await ingestPdfBuffer({
+      fileBuffer,
       title: file.originalname,
       fileUrl: file.path,
       fileType: file.mimetype,
-      uploadedBy: req.user._id,
-      extractedText
+      uploadedBy: req.user._id
     });
-
-    const chunkEmbeddings = [];
-    for (let i = 0; i < chunks.length; i++) {
-
-      const embedding = to1dEmbedding(await generateEmbedding(chunks[i]));
-      chunkEmbeddings.push(embedding);
-
-      await Chunk.create({
-        documentId: document._id,
-        text: chunks[i],
-        embedding,
-        chunkIndex: i
-      });
-    }
-
-    const docEmbedding = meanEmbedding(chunkEmbeddings);
-    if (docEmbedding.length > 0) {
-      await Document.updateOne({ _id: document._id }, { $set: { embeddings: docEmbedding } });
-    }
 
     return res.json({
       message: "Document uploaded and chunked successfully",
       documentId: document._id,
-      chunksCreated: chunks.length
+      chunksCreated
     });
 
   } catch (error) {
     console.error("Error in uploadDocument:", error);
     console.error(error?.stack);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+exports.downloadDemoPdf = async (req, res) => {
+  try {
+    const buffer = await createDemoPdfBuffer();
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", 'attachment; filename="BACKEND_API_PHASES_DEMO.pdf"');
+    return res.status(200).send(buffer);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+exports.ingestDemoPdf = async (req, res) => {
+  try {
+    const buffer = await createDemoPdfBuffer();
+    const uploadsDir = await ensureUploadsDir();
+    const fileName = `demo-${Date.now()}.pdf`;
+    const filePath = path.join(uploadsDir, fileName);
+    await fs.promises.writeFile(filePath, buffer);
+
+    const { document, chunksCreated } = await ingestPdfBuffer({
+      fileBuffer: buffer,
+      title: "BACKEND_API_PHASES_DEMO.pdf",
+      fileUrl: filePath,
+      fileType: "application/pdf",
+      uploadedBy: req.user._id
+    });
+
+    return res.json({
+      message: "Demo PDF ingested successfully",
+      documentId: document._id,
+      chunksCreated
+    });
+  } catch (error) {
+    console.error("Error in ingestDemoPdf:", error);
+    console.error(error?.stack);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+exports.listChunks = async (req, res) => {
+  try {
+    const limitRaw = Number(req.query.limit ?? 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 10;
+
+    const chunks = await Chunk.find({})
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .select({ text: 1, documentId: 1, chunkIndex: 1, createdAt: 1 });
+
+    return res.json({ chunks });
+  } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 };
@@ -183,22 +297,48 @@ exports.searchChunks = async (req, res) => {
 
     const { query } = req.body;
 
-    const queryEmbedding = await generateEmbedding(query);
+    if (!query) {
+      return res.status(400).json({ message: "Query is required" });
+    }
 
-    const results = await Chunk.aggregate([
-      {
-        $vectorSearch: {
-          index: "chunk_vector_index",
-          path: "embedding",
-          queryVector: queryEmbedding,
-          numCandidates: 100,
-          limit: 5
+    let vectorResults = [];
+    try {
+      const queryEmbedding = await generateEmbedding(query);
+
+      vectorResults = await Chunk.aggregate([
+        {
+          $vectorSearch: {
+            index: "chunk_vector_index",
+            path: "embedding",
+            queryVector: queryEmbedding,
+            numCandidates: 100,
+            limit: 5
+          }
         }
-      }
-    ]);
+      ]);
+    } catch (e) {
+      // If vector search fails (e.g., index not available), fall back to keyword only
+      console.error("Vector search on chunks failed, falling back to keyword search:", e.message);
+    }
+
+    let keywordResults = [];
+    try {
+      keywordResults = await Chunk.find(
+        { $text: { $search: query } },
+        { score: { $meta: "textScore" } }
+      )
+        .sort({ score: { $meta: "textScore" } })
+        .limit(5)
+        .lean();
+    } catch (e) {
+      // ignore text index errors; vector results may still exist
+      console.error("Text search on chunks failed:", e.message);
+    }
+
+    const combined = [...vectorResults, ...keywordResults];
 
     res.json({
-      chunks: results
+      chunks: combined
     });
 
   } catch (error) {
