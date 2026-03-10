@@ -69,6 +69,14 @@ The goal is to look and behave like a **mini internal documentation assistant** 
    - Client registers/logs in and receives a JWT.
    - All knowledge base and AI routes are behind `Authorization: Bearer <token>`.
 
+## API docs (Swagger)
+
+After starting the server, open Swagger UI at:
+- `http://localhost:5000/api-docs`
+
+If you set a different port, use:
+- `http://localhost:<PORT>/api-docs`
+
 2. **Ingest documents**
    - Upload a PDF or call the demo‑ingest endpoint.
    - The backend parses the PDF, extracts text, chunks it, embeds each chunk, and stores everything in MongoDB.
